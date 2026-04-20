@@ -1,0 +1,21 @@
+# Xcode User Data
+xcuserdata/
+*.xcuserstate
+
+# Build Products
+build/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# CocoaPods (if used)
+Pods/
+
+# macOS
+.DS_Store
+
+# Temporary Files
+*.swp
+*~.nib
