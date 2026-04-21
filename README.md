@@ -85,14 +85,8 @@ LiDARapp/
     └── Assets.xcassets/
 ```
 
-For detailed architecture documentation, see [ARCHITECTURE_GUIDE.md](ARCHITECTURE_GUIDE.md)
 
-## 📚 Documentation
-
-- [Architecture Guide](ARCHITECTURE_GUIDE.md) - Detailed system architecture
-- [Tutorial](TUTORIAL.md) - Step-by-step usage guide
-
-## 🔬 Technical Details
+## Technical Details
 
 ### LiDAR Integration
 
@@ -109,31 +103,3 @@ The app uses ARKit's `ARWorldTrackingConfiguration` with `.sceneDepth` frame sem
 - **Media Files**: Stored in app's Documents directory
 - **Depth Data**: Saved as JSON for easy parsing
 - **Metadata**: Persisted using UserDefaults with Codable
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built with SwiftUI and ARKit
-- Uses Apple's LiDAR sensor technology
-- Inspired by professional measurement tools
-
-## 📧 Contact
-
-For questions or support, please open an issue on GitHub.
-
----
-
-**Note**: This app requires a physical LiDAR-equipped device for full functionality. The iOS Simulator does not support LiDAR features.
