@@ -1,31 +1,25 @@
 # LiDAR Measurement App
 
-A professional iOS application for capturing photos and videos with LiDAR depth data, enabling real-world distance and dimensional measurements.
+An iOS prototype for capturing photos and videos with LiDAR depth data, enabling real-world distance and dimensional measurements.
 
-## 📱 Features
+## Features
 
 - **LiDAR Detection**: Automatic detection of LiDAR-capable devices
 - **Photo & Video Capture**: Capture media with synchronized depth data
 - **Distance Measurements**: Measure point-to-point distances in real-world units
 - **Bounding Box Measurements**: Calculate width and height of objects
-- **Persistent Storage**: Save all captures and measurements locally
-- **Gallery View**: Browse and manage captured media
 - **Interactive Measurement Tools**: Intuitive tap-based measurement interface
 
-## 🔧 Requirements
+## Requirements
 
 - **iOS**: 14.0 or later
 - **Device**: LiDAR-equipped device required for depth features
-  - iPhone 12 Pro / Pro Max or later
-  - iPhone 13 Pro / Pro Max or later
-  - iPhone 14 Pro / Pro Max or later
-  - iPhone 15 Pro / Pro Max or later
+  - iPhone 12 Pro / Pro Max or later (only Pro / Pro Max models)
   - iPad Pro (4th generation) 11-inch or later
-  - iPad Pro (5th generation) 12.9-inch or later
 - **Xcode**: 14.0 or later
 - **Swift**: 5.7 or later
 
-## 🚀 Installation
+## Installation
 
 1. Clone the repository:
    ```bash
@@ -42,7 +36,7 @@ A professional iOS application for capturing photos and videos with LiDAR depth 
 
 4. Build and run on a LiDAR-capable device (Simulator will not have LiDAR functionality)
 
-## 📖 Usage
+## Usage
 
 ### Capturing Media
 
@@ -62,7 +56,7 @@ A professional iOS application for capturing photos and videos with LiDAR depth 
    - **Bounding Box**: Tap four corners to measure width and height
 5. Review the measurement result and tap **Save** to store it
 
-## 🏗️ Architecture
+## Architecture
 
 The app follows a clean architecture pattern with clear separation of concerns:
 
