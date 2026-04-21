@@ -19,7 +19,7 @@ An iOS prototype for capturing photos and videos with LiDAR depth data, enabling
 - **Xcode**: 14.0 or later
 - **Swift**: 5.7 or later
 
-## 🚀 Installation
+## Installation
 
 1. Clone the repository:
    ```bash
