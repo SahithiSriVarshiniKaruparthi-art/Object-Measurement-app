@@ -10,8 +10,6 @@ DerivedData/
 .swiftpm/
 .build/
 
-# CocoaPods (if used)
-Pods/
 
 # macOS
 .DS_Store
