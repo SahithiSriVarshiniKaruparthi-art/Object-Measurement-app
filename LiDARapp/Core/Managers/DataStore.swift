@@ -2,11 +2,7 @@
 //  DataStore.swift
 //  LiDARapp
 //
-//  Created by LiDAR Team on 2026
-//  Copyright © 2026 LiDAR Measurement App. All rights reserved.
-//
 //  Simple data persistence manager using UserDefaults and FileManager
-//  This is a POC implementation - can be upgraded to SQLite later for Maximo integration
 //
 
 import Foundation
@@ -17,23 +13,11 @@ import Combine
 /// Manages all data persistence for the app
 /// Uses UserDefaults for metadata and FileManager for actual files
 class DataStore: ObservableObject {
-    
-    // MARK: - Singleton
-    /// Shared instance - use this throughout the app
+
     static let shared = DataStore()
-    
-    // MARK: - Published Properties
-    /// Array of all media items - SwiftUI views will automatically update when this changes
     @Published var mediaItems: [MediaItem] = []
-    
-    // MARK: - Constants
-    /// UserDefaults key for storing media items metadata
     private let mediaItemsKey = "mediaItems"
-    
-    /// Directory where we store all media files
     private let mediaDirectory: URL
-    
-    /// Directory where we store depth data files
     private let depthDirectory: URL
     
     // MARK: - Initialization
