@@ -2,9 +2,6 @@
 //  MeasurementView.swift
 //  LiDARapp
 //
-//  Created by LiDAR Team on 2026
-//  Copyright © 2026 LiDAR Measurement App. All rights reserved.
-//
 //  Interactive view for measuring distances and bounding boxes on photos
 //
 
