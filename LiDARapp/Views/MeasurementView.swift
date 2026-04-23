@@ -30,6 +30,8 @@ struct MeasurementView: View {
         ZStack {
             // LAYER 1: Image with tap detection (BOTTOM)
             GeometryReader { geometry in
+                let imageFrame = calculateImageFrame(in: geometry.size)
+                
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -39,15 +41,16 @@ struct MeasurementView: View {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onEnded { value in
-                                print("[LiDARManager] Tap at: \(value.location)")
-                                handleTap(at: value.location, in: geometry.size)
+                                print("[MeasurementView] Tap at: \(value.location) in view size: \(geometry.size)")
+                                handleTap(at: value.location, in: geometry.size, imageFrame: imageFrame)
                             }
                     )
                     .overlay(
                         MeasurementOverlay(
                             points: selectedPoints,
                             mode: measurementMode,
-                            imageSize: geometry.size
+                            imageFrame: imageFrame,
+                            viewSize: geometry.size
                         )
                         .allowsHitTesting(false)  // Overlay shouldn't block taps
                     )
@@ -136,21 +139,59 @@ struct MeasurementView: View {
         }
     }
     
+    // MARK: - Image Frame Calculation
+    /// Calculates the actual frame of the image within the view, accounting for scaledToFit
+    private func calculateImageFrame(in viewSize: CGSize) -> CGRect {
+        let imageSize = image.size
+        let imageAspect = imageSize.width / imageSize.height
+        let viewAspect = viewSize.width / viewSize.height
+        
+        var imageFrame: CGRect
+        
+        if imageAspect > viewAspect {
+            // Image is wider - will have top/bottom letterboxing
+            let scaledHeight = viewSize.width / imageAspect
+            let yOffset = (viewSize.height - scaledHeight) / 2
+            imageFrame = CGRect(x: 0, y: yOffset, width: viewSize.width, height: scaledHeight)
+        } else {
+            // Image is taller - will have left/right pillarboxing
+            let scaledWidth = viewSize.height * imageAspect
+            let xOffset = (viewSize.width - scaledWidth) / 2
+            imageFrame = CGRect(x: xOffset, y: 0, width: scaledWidth, height: viewSize.height)
+        }
+        
+        print("[MeasurementView] Image frame: \(imageFrame) in view: \(viewSize)")
+        return imageFrame
+    }
+    
     // MARK: - Handle Tap
     /// Handles user taps to add measurement points
-    private func handleTap(at location: CGPoint, in size: CGSize) {
-        print("[LiDARManager] Tap detected at: \(location) in size: \(size)")
+    private func handleTap(at location: CGPoint, in viewSize: CGSize, imageFrame: CGRect) {
+        print("[MeasurementView] === Tap Handler ===")
+        print("[MeasurementView] Tap at: \(location) in view size: \(viewSize)")
         guard !isMeasuring else { return }
         
-        // Normalize coordinates to 0-1 range
+        // Check if tap is within the actual image bounds
+        guard imageFrame.contains(location) else {
+            print("[MeasurementView] ❌ Tap outside image bounds (letterbox/pillarbox area)")
+            return
+        }
+        
+        // Convert tap location to normalized coordinates relative to the IMAGE (not the view)
         let normalizedPoint = CGPoint(
-            x: location.x / size.width,
-            y: location.y / size.height
+            x: (location.x - imageFrame.origin.x) / imageFrame.width,
+            y: (location.y - imageFrame.origin.y) / imageFrame.height
         )
         
-        print("[MeasurementView] Normalized: (\(String(format: "%.3f", normalizedPoint.x)), \(String(format: "%.3f", normalizedPoint.y)))")
+        // Clamp to 0-1 range
+        let clampedPoint = CGPoint(
+            x: max(0, min(1, normalizedPoint.x)),
+            y: max(0, min(1, normalizedPoint.y))
+        )
         
-        selectedPoints.append(normalizedPoint)
+        print("[MeasurementView] Normalized to image: (\(String(format: "%.3f", clampedPoint.x)), \(String(format: "%.3f", clampedPoint.y)))")
+        
+        selectedPoints.append(clampedPoint)
         
         // Check if we have enough points to calculate
         let requiredPoints = measurementMode == .distance ? 2 : 4
@@ -191,12 +232,17 @@ struct MeasurementView: View {
     private func calculateDistance(depthData: DepthData) {
         guard selectedPoints.count == 2 else { return }
         
-        if let distance = lidarManager.calculateDistance(
+        // Use the original image size from depth data for accurate mapping
+        let imageSize = depthData.imageResolution
+        
+        if let distanceCm = lidarManager.calculateDistance(
             from: selectedPoints[0],
             to: selectedPoints[1],
-            using: depthData
+            using: depthData,
+            imageSize: imageSize
         ) {
-            measurementResult = String(format: "Distance: %.2f meters\n(%.0f cm)", distance, distance * 100)
+            let distanceM = distanceCm / 100.0
+            measurementResult = String(format: "Distance: %.1f cm\n(%.2f meters)", distanceCm, distanceM)
         } else {
             measurementResult = "❌ Could not calculate distance"
         }
@@ -206,16 +252,22 @@ struct MeasurementView: View {
     private func calculateBoundingBox(depthData: DepthData) {
         guard selectedPoints.count == 4 else { return }
         
+        // Use the original image size from depth data for accurate mapping
+        let imageSize = depthData.imageResolution
+        
         if let dimensions = lidarManager.calculateBoundingBox(
             topLeft: selectedPoints[0],
             topRight: selectedPoints[1],
             bottomLeft: selectedPoints[3],
             bottomRight: selectedPoints[2],
-            using: depthData
+            using: depthData,
+            imageSize: imageSize
         ) {
-            measurementResult = String(format: "Width: %.2f m (%.0f cm)\nHeight: %.2f m (%.0f cm)",
-                                      dimensions.width, dimensions.width * 100,
-                                      dimensions.height, dimensions.height * 100)
+            let widthM = dimensions.width / 100.0
+            let heightM = dimensions.height / 100.0
+            measurementResult = String(format: "Width: %.1f cm (%.2f m)\nHeight: %.1f cm (%.2f m)",
+                                      dimensions.width, widthM,
+                                      dimensions.height, heightM)
         } else {
             measurementResult = "❌ Could not calculate dimensions"
         }
@@ -227,19 +279,22 @@ struct MeasurementView: View {
         guard let depthData = depthData else { return }
         
         let measurement: Measurement
+        let imageSize = depthData.imageResolution
         
         switch measurementMode {
         case .distance:
             guard selectedPoints.count == 2,
-                  let distance = lidarManager.calculateDistance(
+                  let distanceCm = lidarManager.calculateDistance(
                     from: selectedPoints[0],
                     to: selectedPoints[1],
-                    using: depthData
+                    using: depthData,
+                    imageSize: imageSize
                   ) else { return }
             
+            // Store in centimeters
             measurement = Measurement(
                 type: .distance,
-                value: distance,
+                value: distanceCm,
                 screenPoints: selectedPoints
             )
             
@@ -250,9 +305,11 @@ struct MeasurementView: View {
                     topRight: selectedPoints[1],
                     bottomLeft: selectedPoints[3],
                     bottomRight: selectedPoints[2],
-                    using: depthData
+                    using: depthData,
+                    imageSize: imageSize
                   ) else { return }
             
+            // Store in centimeters
             measurement = Measurement(
                 type: .boundingBox,
                 value: dimensions.width,
@@ -264,7 +321,7 @@ struct MeasurementView: View {
         // Save to data store
         DataStore.shared.addMeasurement(measurement, to: mediaItem)
         
-        print("[LiDARManager] Measurement saved: \(measurement.description)")
+        print("[MeasurementView] ✅ Measurement saved: \(measurement.description)")
 
         // Auto-dismiss after successful save
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -293,15 +350,16 @@ enum MeasurementMode {
 struct MeasurementOverlay: View {
     let points: [CGPoint]
     let mode: MeasurementMode
-    let imageSize: CGSize
+    let imageFrame: CGRect
+    let viewSize: CGSize
     
     var body: some View {
         Canvas { context, size in
-            // Convert normalized points to actual coordinates
+            // Convert normalized points (0-1 relative to image) to actual screen coordinates
             let actualPoints = points.map { point in
                 CGPoint(
-                    x: point.x * imageSize.width,
-                    y: point.y * imageSize.height
+                    x: imageFrame.origin.x + (point.x * imageFrame.width),
+                    y: imageFrame.origin.y + (point.y * imageFrame.height)
                 )
             }
             
