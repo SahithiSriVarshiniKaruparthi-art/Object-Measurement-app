@@ -2,9 +2,6 @@
 //  GalleryView.swift
 //  LiDARapp
 //
-//  Created by LiDAR Team on 2026
-//  Copyright © 2026 LiDAR Measurement App. All rights reserved.
-//
 //  Gallery view to display all captured photos and videos
 //
 
@@ -139,7 +136,7 @@ struct MediaThumbnailView: View {
             
             switch mediaItem.type {
             case .photo:
-                // For photos, load the actual image (could be optimized with smaller thumbnails)
+                // For photos, load the actual image
                 thumb = DataStore.shared.loadImage(for: mediaItem)
                 
             case .video:
