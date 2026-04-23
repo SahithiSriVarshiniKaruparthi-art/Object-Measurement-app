@@ -1,7 +1,8 @@
 //
 //  LiDARManager.swift
-//  LiDARapp
-//  Manages LiDAR sensor detection and depth data capture using ARKit
+//
+//  Utility class for LiDAR detection and measurement calculations
+//  Note: AR session management is now handled by ARCameraViewController
 //
 
 import Foundation
@@ -10,8 +11,7 @@ import Combine
 
 // MARK: - Constants
 /// Configuration constants for LiDAR depth processing
-private struct LiDARConstants {
-    
+struct LiDARConstants {
     static let maxDepthRange: Float = 5.0
     static let minDepthRange: Float = 0.0
     static let surfaceThreshold: Float = 0.1
@@ -21,23 +21,14 @@ private struct LiDARConstants {
 }
 
 // MARK: - LiDAR Manager
-/// Manages LiDAR availability detection and depth data capture
-class LiDARManager: NSObject, ObservableObject {
+/// Utility class for LiDAR availability detection and measurement calculations
+/// AR session management is handled by ARCameraViewController
+class LiDARManager: ObservableObject {
     
     @Published var isLiDARAvailable: Bool = false
-
-    @Published var isSessionRunning: Bool = false
-
-    @Published var currentDepthData: DepthData?
-
-    private var arSession: ARSession?
-    
-    /// Configuration for the AR session
-    private var configuration: ARWorldTrackingConfiguration?
     
     // MARK: - Initialization
-    override init() {
-        super.init()
+    init() {
         checkLiDARAvailability()
     }
     
@@ -51,150 +42,6 @@ class LiDARManager: NSObject, ObservableObject {
         } else {
             print("[LiDARManager] LiDAR is NOT available on this device")
         }
-    }
-    
-    // MARK: - Session Management
-    /// Starts the AR session to begin capturing depth data
-    func startSession() {
-        guard isLiDARAvailable else {
-            print("[LiDARManager] Cannot start session - LiDAR not available")
-            return
-        }
-        
-        if arSession == nil {
-            arSession = ARSession()
-            arSession?.delegate = self
-        }
-        
-        let config = ARWorldTrackingConfiguration()
-        
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
-            config.frameSemantics = .sceneDepth
-        }
-        
-        arSession?.run(config)
-        isSessionRunning = true
-        
-        print("[LiDARManager] AR session started with LiDAR depth capture")
-    }
-    
-    /// Pauses the AR session
-    func pauseSession() {
-        arSession?.pause()
-        isSessionRunning = false
-        print("[LiDARManager] AR session paused")
-    }
-    
-    /// Stops and cleans up the AR session
-    func stopSession() {
-        arSession?.pause()
-        arSession = nil
-        isSessionRunning = false
-        currentDepthData = nil
-        print("[LiDARManager] AR session stopped")
-    }
-    
-    // MARK: - Depth Data Capture
-    /// Captures the current depth data from the AR session
-    func captureDepthData() -> DepthData? {
-        guard let frame = arSession?.currentFrame,
-              let depthMap = frame.sceneDepth?.depthMap else {
-            print("[LiDARManager] No depth data available in current frame")
-            return nil
-        }
-        
-        let depthData = convertDepthMap(depthMap, frame: frame)
-        currentDepthData = depthData
-        
-        if let data = depthData {
-            print("[LiDARManager] Captured depth data: \(data.points.count) points")
-        }
-        
-        return depthData
-    }
-    
-    // MARK: - Depth Map Conversion
-    /// Converts ARKit's depth map (CVPixelBuffer) to our DepthData format
-    private func convertDepthMap(
-        _ depthMap: CVPixelBuffer,
-        frame: ARFrame
-    ) -> DepthData? {
-
-        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(depthMap) else {
-            print("[LiDARManager] Failed to get depth buffer base address")
-            return nil
-        }
-
-        let depthWidth  = CVPixelBufferGetWidth(depthMap)
-        let depthHeight = CVPixelBufferGetHeight(depthMap)
-
-        let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
-
-        // Camera info
-        let intrinsics = frame.camera.intrinsics
-        let cameraTransform = frame.camera.transform
-        let imageResolution = frame.camera.imageResolution
-
-        // Scale factors
-        let scaleX = Float(imageResolution.width)  / Float(depthWidth)
-        let scaleY = Float(imageResolution.height) / Float(depthHeight)
-
-        let fx = intrinsics[0, 0]
-        let fy = intrinsics[1, 1]
-        let cx = intrinsics[2, 0]
-        let cy = intrinsics[2, 1]
-
-        var points: [DepthPoint] = []
-        let sampleRate = LiDARConstants.depthSampleRate
-
-        for y in stride(from: 0, to: depthHeight, by: sampleRate) {
-            for x in stride(from: 0, to: depthWidth, by: sampleRate) {
-
-                let index = y * depthWidth + x
-                let depth = depthPointer[index]
-
-                // Skip invalid depth
-                guard depth > LiDARConstants.minDepthRange && depth < LiDARConstants.maxDepthRange else { continue }
-
-
-                // Map depth pixel → camera image pixel
-                let imageX = Float(x) * scaleX
-                let imageY = Float(y) * scaleY
-
-                // Camera‑space projection (intrinsics applied)
-                let cameraX = (imageX - cx) / fx * depth
-                let cameraY = (imageY - cy) / fy * depth
-                let cameraZ = depth
-
-                let cameraPoint = simd_float4(
-                    cameraX,
-                    cameraY,
-                    cameraZ,
-                    1.0
-                )
-
-                // Camera space → World space (CRITICAL FIX)
-                let worldPoint = cameraTransform * cameraPoint
-
-                points.append(
-                    DepthPoint(
-                        x: worldPoint.x,
-                        y: worldPoint.y,
-                        z: worldPoint.z
-                    )
-                )
-            }
-        }
-
-        return DepthData(
-            points: points,
-            width: depthWidth / sampleRate,
-            height: depthHeight / sampleRate,
-            capturedAt: Date()
-        )
     }
 
     
@@ -232,7 +79,7 @@ class LiDARManager: NSObject, ObservableObject {
             return nil
         }
         
-        // Calculate median depth 
+        // Calculate median depth (more robust than average)
         let depths = neighborPoints.map { $0.z }.sorted()
         let medianDepth = depths[depths.count / 2]
         
@@ -338,32 +185,6 @@ class LiDARManager: NSObject, ObservableObject {
         print("[LiDARManager] Calculated bounding box: \(width)m × \(height)m")
         
         return (width: width, height: height)
-    }
-}
-
-// MARK: - ARSession Delegate
-extension LiDARManager: ARSessionDelegate {
-    /// Called when AR session updates with new frame
-    /// We can use this to continuously monitor depth data if needed
-    func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        
-    }
-    
-    /// Called when AR session fails
-    func session(_ session: ARSession, didFailWithError error: Error) {
-        print("[LiDARManager] AR session failed: \(error.localizedDescription)")
-        isSessionRunning = false
-    }
-    
-    /// Called when AR session is interrupted (e.g., app goes to background)
-    func sessionWasInterrupted(_ session: ARSession) {
-        print("[LiDARManager] AR session was interrupted")
-        isSessionRunning = false
-    }
-    
-    /// Called when AR session interruption ends
-    func sessionInterruptionEnded(_ session: ARSession) {
-        print("[LiDARManager] AR session interruption ended")
     }
 }
 

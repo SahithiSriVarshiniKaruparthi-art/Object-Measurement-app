@@ -1,9 +1,10 @@
-//
+
 //  DataStore.swift
 //  LiDARapp
-//
+
 //  Simple data persistence manager using UserDefaults and FileManager
-//
+//  POC implementation
+
 
 import Foundation
 import UIKit
@@ -13,11 +14,15 @@ import Combine
 /// Manages all data persistence for the app
 /// Uses UserDefaults for metadata and FileManager for actual files
 class DataStore: ObservableObject {
-
+    
     static let shared = DataStore()
+
     @Published var mediaItems: [MediaItem] = []
+
     private let mediaItemsKey = "mediaItems"
+
     private let mediaDirectory: URL
+  
     private let depthDirectory: URL
     
     // MARK: - Initialization
@@ -175,7 +180,7 @@ class DataStore: ObservableObject {
     }
     
     // MARK: - Update Media Item
-    /// Updates an existing media item (e.g., to add measurements)
+    /// Updates an existing media item (to add measurements, etc)
     /// - Parameter mediaItem: The updated media item
     func updateMediaItem(_ mediaItem: MediaItem) {
         if let index = mediaItems.firstIndex(where: { $0.id == mediaItem.id }) {
@@ -207,7 +212,6 @@ class DataStore: ObservableObject {
     }
     
     // MARK: - Get File URLs
-    /// Gets the file URL for a media item
     /// - Parameter mediaItem: The media item
     /// - Returns: URL to the media file
     func getMediaURL(for mediaItem: MediaItem) -> URL {

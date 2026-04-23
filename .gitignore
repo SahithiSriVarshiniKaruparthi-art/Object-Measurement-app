@@ -10,10 +10,11 @@ DerivedData/
 .swiftpm/
 .build/
 
-
 # macOS
 .DS_Store
 
 # Temporary Files
 *.swp
 *~.nib
+# Documentation
+DOCUMENTATION.md

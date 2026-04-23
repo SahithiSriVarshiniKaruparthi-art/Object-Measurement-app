@@ -1,17 +1,17 @@
 //
 //  CameraView.swift
-//  LiDARapp
-//
 //  Camera interface for capturing photos and videos with LiDAR data
+//  Now uses ARKit for both camera and depth capture for better accuracy
 //
 
 import SwiftUI
+import ARKit
 import AVFoundation
 
 // MARK: - Camera View
 /// Main camera interface with capture controls
 struct CameraView: View {
-    // Access to our managers
+    // Access to the managers
     @StateObject private var lidarManager = LiDARManager()
     @ObservedObject var dataStore = DataStore.shared
     
@@ -90,10 +90,8 @@ struct CameraView: View {
     
     private func openCamera() {
         showCamera = true
-        // Start LiDAR session if available
-        //     lidarManager.startSession()
-        // }
     }
+}
 
 // MARK: - LiDAR Status View
 /// Shows whether LiDAR is available on the device
@@ -118,28 +116,28 @@ struct LiDARStatusView: View {
 }
 
 // MARK: - Camera Preview View
-/// UIKit camera preview wrapped in SwiftUI
+/// ARKit camera preview wrapped in SwiftUI
 struct CameraPreviewView: UIViewControllerRepresentable {
     @Binding var capturedImage: UIImage?
     @Binding var isCapturing: Bool
     let lidarManager: LiDARManager
     
-    func makeUIViewController(context: Context) -> CameraViewController {
-        let controller = CameraViewController()
+    func makeUIViewController(context: Context) -> ARCameraViewController {
+        let controller = ARCameraViewController()
         controller.delegate = context.coordinator
         controller.lidarManager = lidarManager
         return controller
     }
     
-    func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {
-
+    func updateUIViewController(_ uiViewController: ARCameraViewController, context: Context) {
+        
     }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
     
-    class Coordinator: NSObject, CameraViewControllerDelegate {
+    class Coordinator: NSObject, ARCameraViewControllerDelegate {
         let parent: CameraPreviewView
         
         init(_ parent: CameraPreviewView) {
@@ -171,94 +169,78 @@ struct CameraPreviewView: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - Camera View Controller Delegate
-protocol CameraViewControllerDelegate: AnyObject {
+// MARK: - AR Camera View Controller Delegate
+protocol ARCameraViewControllerDelegate: AnyObject {
     func didCapturePhoto(_ image: UIImage, depthData: DepthData?)
     func didCaptureVideo(_ url: URL, depthData: DepthData?)
 }
 
-// MARK: - Camera View Controller
-/// UIKit view controller that handles the actual camera functionality
-class CameraViewController: UIViewController {
+// MARK: - AR Camera View Controller
+/// UIKit view controller that uses ARKit for both camera and depth capture
+class ARCameraViewController: UIViewController {
     
-    weak var delegate: CameraViewControllerDelegate?
+    weak var delegate: ARCameraViewControllerDelegate?
     var lidarManager: LiDARManager?
     
-    // AVFoundation components
-    private var captureSession: AVCaptureSession?
-    private var photoOutput: AVCapturePhotoOutput?
-    private var videoOutput: AVCaptureMovieFileOutput?
-    private var previewLayer: AVCaptureVideoPreviewLayer?
+    // ARKit components
+    private var arSession: ARSession!
+    private var arView: ARSCNView!
+    
+    // Video recording
+    private var videoWriter: AVAssetWriter?
+    private var videoWriterInput: AVAssetWriterInput?
+    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var isRecording = false
+    private var recordingStartTime: CMTime?
+    private var videoURL: URL?
+    private var depthDataBuffer: [DepthData] = []
     
     // UI Elements
     private var captureButton: UIButton!
     private var switchModeButton: UIButton!
     private var closeButton: UIButton!
+    private var recordingIndicator: UIView!
     
     // State
     private var isPhotoMode = true
-    private var isRecording = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupCamera()
+        setupARView()
         setupUI()
+        startARSession()
     }
     
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        previewLayer?.frame = view.bounds
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        arSession.pause()
     }
     
-    // MARK: - Camera Setup
-    private func setupCamera() {
-
-        // Stop AR session if running
-        lidarManager?.stopSession()
-
-        // Create capture session
-        captureSession = AVCaptureSession()
-        captureSession?.sessionPreset = .photo
+    // MARK: - AR Setup
+    private func setupARView() {
+        arView = ARSCNView(frame: view.bounds)
+        arView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        arView.session.delegate = self
+        view.addSubview(arView)
         
-        // Get back camera
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            print("[LiDARManager] No camera available")
-            return
+        arSession = arView.session
+        
+        print("[ARCameraView] ARView setup complete")
+    }
+    
+    private func startARSession() {
+        let configuration = ARWorldTrackingConfiguration()
+        
+        // Enable scene depth for LiDAR
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            configuration.frameSemantics = .sceneDepth
+            print("[ARCameraView] LiDAR depth enabled")
+        } else {
+            print("[ARCameraView] LiDAR not available on this device")
         }
         
-        do {
-            // Add camera input
-            let input = try AVCaptureDeviceInput(device: camera)
-            if captureSession?.canAddInput(input) == true {
-                captureSession?.addInput(input)
-            }
-            
-            // Add photo output
-            photoOutput = AVCapturePhotoOutput()
-            if let photoOutput = photoOutput, captureSession?.canAddOutput(photoOutput) == true {
-                captureSession?.addOutput(photoOutput)
-            }
-
-            videoOutput = AVCaptureMovieFileOutput()
-
-
-            
-            // Setup preview layer
-            previewLayer = AVCaptureVideoPreviewLayer(session: captureSession!)
-            previewLayer?.videoGravity = .resizeAspectFill
-            previewLayer?.frame = view.bounds
-            view.layer.addSublayer(previewLayer!)
-            
-            // Start session
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.captureSession?.startRunning()
-            }
-            
-            print("[CameraView] Camera setup complete")
-            
-        } catch {
-            print("[LiDARManager] Error setting up camera: \(error.localizedDescription)")
-        }
+        arSession.run(configuration)
+        print("[ARCameraView] AR session started")
     }
     
     // MARK: - UI Setup
@@ -272,6 +254,24 @@ class CameraViewController: UIViewController {
         closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(closeButton)
+        
+        // Recording indicator (top center)
+        recordingIndicator = UIView()
+        recordingIndicator.backgroundColor = .red
+        recordingIndicator.layer.cornerRadius = 8
+        recordingIndicator.isHidden = true
+        recordingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(recordingIndicator)
+        
+        // Add pulsing animation to recording indicator
+        let pulseAnimation = CABasicAnimation(keyPath: "opacity")
+        pulseAnimation.duration = 1.0
+        pulseAnimation.fromValue = 1.0
+        pulseAnimation.toValue = 0.3
+        pulseAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulseAnimation.autoreverses = true
+        pulseAnimation.repeatCount = .infinity
+        recordingIndicator.layer.add(pulseAnimation, forKey: "pulse")
         
         // Capture button (bottom center)
         captureButton = UIButton(type: .system)
@@ -301,6 +301,12 @@ class CameraViewController: UIViewController {
             closeButton.widthAnchor.constraint(equalToConstant: 50),
             closeButton.heightAnchor.constraint(equalToConstant: 50),
             
+            // Recording indicator
+            recordingIndicator.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
+            recordingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            recordingIndicator.widthAnchor.constraint(equalToConstant: 16),
+            recordingIndicator.heightAnchor.constraint(equalToConstant: 16),
+            
             // Capture button
             captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
@@ -317,8 +323,10 @@ class CameraViewController: UIViewController {
     
     // MARK: - Actions
     @objc private func closeTapped() {
-        captureSession?.stopRunning()
-        lidarManager?.pauseSession()
+        if isRecording {
+            stopRecording()
+        }
+        arSession.pause()
         dismiss(animated: true)
     }
     
@@ -338,43 +346,30 @@ class CameraViewController: UIViewController {
         isPhotoMode.toggle()
         let title = isPhotoMode ? "📷 Photo" : "🎥 Video"
         switchModeButton.setTitle(title, for: .normal)
-        
-        // Switch outputs
-        captureSession?.beginConfiguration()
-        
-        if isPhotoMode {
-            // Remove video, add photo
-            if let videoOutput = videoOutput {
-                captureSession?.removeOutput(videoOutput)
-            }
-            if let photoOutput = photoOutput, captureSession?.canAddOutput(photoOutput) == true {
-                captureSession?.addOutput(photoOutput)
-            }
-            captureButton.backgroundColor = .white
-        } else {
-            // Remove photo, add video
-            if let photoOutput = photoOutput {
-                captureSession?.removeOutput(photoOutput)
-            }
-            if let videoOutput = videoOutput, captureSession?.canAddOutput(videoOutput) == true {
-                captureSession?.addOutput(videoOutput)
-            }
-            captureButton.backgroundColor = .red
-        }
-        
-        captureSession?.commitConfiguration()
+        captureButton.backgroundColor = isPhotoMode ? .white : .red
     }
-
     
     // MARK: - Photo Capture
     private func capturePhoto() {
-        guard let photoOutput = photoOutput else { return }
+        guard let frame = arSession.currentFrame else {
+            print("[ARCameraView] No AR frame available")
+            return
+        }
         
-        // PAUSE AR session during capture to avoid conflict
-        lidarManager?.pauseSession()
+        // Capture the camera image
+        let pixelBuffer = frame.capturedImage
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
         
-        let settings = AVCapturePhotoSettings()
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+            print("[ARCameraView] Failed to create CGImage")
+            return
+        }
+        
+        let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+        
+        // Capture depth data
+        let depthData = captureDepthDataFromFrame(frame)
         
         // Flash animation
         let flashView = UIView(frame: view.bounds)
@@ -386,80 +381,211 @@ class CameraViewController: UIViewController {
             flashView.removeFromSuperview()
         }
         
-        print("[CameraView] Capturing photo...")
+        // Notify delegate
+        delegate?.didCapturePhoto(image, depthData: depthData)
+        
+        print("[ARCameraView] Photo captured with depth data")
     }
-
     
     // MARK: - Video Recording
     private func startRecording() {
-        guard let videoOutput = videoOutput else { return }
-        
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
-        videoOutput.startRecording(to: tempURL, recordingDelegate: self)
+        videoURL = tempURL
+        depthDataBuffer.removeAll()
         
-        isRecording = true
-        captureButton.backgroundColor = .red
-        captureButton.layer.borderColor = UIColor.red.cgColor
-        
-        print("[CameraView] Started recording...")
+        // Setup video writer
+        do {
+            videoWriter = try AVAssetWriter(outputURL: tempURL, fileType: .mov)
+            
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: 1920,
+                AVVideoHeightKey: 1440
+            ]
+            
+            videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            videoWriterInput?.expectsMediaDataInRealTime = true
+            
+            let sourcePixelBufferAttributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: 1920,
+                kCVPixelBufferHeightKey as String: 1440
+            ]
+            
+            pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: videoWriterInput!,
+                sourcePixelBufferAttributes: sourcePixelBufferAttributes
+            )
+            
+            if let input = videoWriterInput, videoWriter!.canAdd(input) {
+                videoWriter!.add(input)
+            }
+            
+            videoWriter!.startWriting()
+            recordingStartTime = nil
+            isRecording = true
+            
+            // Update UI
+            captureButton.backgroundColor = .red
+            captureButton.layer.borderColor = UIColor.red.cgColor
+            recordingIndicator.isHidden = false
+            
+            print("[ARCameraView] Started recording")
+            
+        } catch {
+            print("[ARCameraView] Failed to setup video writer: \(error)")
+        }
     }
     
     private func stopRecording() {
-        videoOutput?.stopRecording()
+        guard isRecording else { return }
+        
         isRecording = false
         captureButton.backgroundColor = .white
         captureButton.layer.borderColor = UIColor.white.cgColor
+        recordingIndicator.isHidden = true
         
-        print("[LiDARManager] Stopped recording")
+        videoWriterInput?.markAsFinished()
+        
+        videoWriter?.finishWriting { [weak self] in
+            guard let self = self, let url = self.videoURL else { return }
+            
+            // Calculate average depth data from buffer
+            let averageDepthData = self.calculateAverageDepthData()
+            
+            DispatchQueue.main.async {
+                self.delegate?.didCaptureVideo(url, depthData: averageDepthData)
+                print("[ARCameraView] Video saved with depth data")
+            }
+            
+            self.videoWriter = nil
+            self.videoWriterInput = nil
+            self.pixelBufferAdaptor = nil
+            self.depthDataBuffer.removeAll()
+        }
+    }
+    
+    // MARK: - Depth Capture Helpers
+    private func captureDepthDataFromFrame(_ frame: ARFrame) -> DepthData? {
+        guard let depthMap = frame.sceneDepth?.depthMap else {
+            print("[ARCameraView] No depth data in frame")
+            return nil
+        }
+        
+        return convertDepthMap(depthMap, frame: frame)
+    }
+    
+    private func convertDepthMap(_ depthMap: CVPixelBuffer, frame: ARFrame) -> DepthData? {
+        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+        
+        guard let baseAddress = CVPixelBufferGetBaseAddress(depthMap) else {
+            return nil
+        }
+        
+        let depthWidth = CVPixelBufferGetWidth(depthMap)
+        let depthHeight = CVPixelBufferGetHeight(depthMap)
+        let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
+        
+        let intrinsics = frame.camera.intrinsics
+        let cameraTransform = frame.camera.transform
+        let imageResolution = frame.camera.imageResolution
+        
+        let scaleX = Float(imageResolution.width) / Float(depthWidth)
+        let scaleY = Float(imageResolution.height) / Float(depthHeight)
+        
+        let fx = intrinsics[0, 0]
+        let fy = intrinsics[1, 1]
+        let cx = intrinsics[2, 0]
+        let cy = intrinsics[2, 1]
+        
+        var points: [DepthPoint] = []
+        let sampleRate = 1
+        
+        for y in stride(from: 0, to: depthHeight, by: sampleRate) {
+            for x in stride(from: 0, to: depthWidth, by: sampleRate) {
+                let index = y * depthWidth + x
+                let depth = depthPointer[index]
+                
+                guard depth > 0.0 && depth < 5.0 else { continue }
+                
+                let imageX = Float(x) * scaleX
+                let imageY = Float(y) * scaleY
+                
+                let cameraX = (imageX - cx) / fx * depth
+                let cameraY = (imageY - cy) / fy * depth
+                let cameraZ = depth
+                
+                let cameraPoint = simd_float4(cameraX, cameraY, cameraZ, 1.0)
+                let worldPoint = cameraTransform * cameraPoint
+                
+                points.append(DepthPoint(x: worldPoint.x, y: worldPoint.y, z: worldPoint.z))
+            }
+        }
+        
+        return DepthData(
+            points: points,
+            width: depthWidth / sampleRate,
+            height: depthHeight / sampleRate,
+            capturedAt: Date()
+        )
+    }
+    
+    private func calculateAverageDepthData() -> DepthData? {
+        guard !depthDataBuffer.isEmpty else { return nil }
+        
+        // Return the most recent depth data (or could average multiple frames)
+        return depthDataBuffer.last
     }
 }
 
-// MARK: - Photo Capture Delegate
-extension CameraViewController: AVCapturePhotoCaptureDelegate {
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-            if let error = error {
-                print("[LiDARManager] Error capturing photo: \(error.localizedDescription)")
-                return
+// MARK: - ARSession Delegate
+extension ARCameraViewController: ARSessionDelegate {
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        // Handle video recording
+        if isRecording, let videoWriterInput = videoWriterInput, videoWriterInput.isReadyForMoreMediaData {
+            let pixelBuffer = frame.capturedImage
+            let timestamp = frame.timestamp
+            
+            if recordingStartTime == nil {
+                recordingStartTime = CMTime(seconds: timestamp, preferredTimescale: 600)
+                videoWriter?.startSession(atSourceTime: recordingStartTime!)
             }
             
-            guard let imageData = photo.fileDataRepresentation(),
-                let image = UIImage(data: imageData) else {
-                print("[LiDARManager] Failed to convert photo to image")
-                return
+            let presentationTime = CMTime(seconds: timestamp, preferredTimescale: 600)
+            
+            // Convert and append pixel buffer
+            if let convertedBuffer = convertPixelBuffer(pixelBuffer) {
+                pixelBufferAdaptor?.append(convertedBuffer, withPresentationTime: presentationTime)
             }
             
-            // NOW start AR session briefly to capture depth
-            if lidarManager?.isLiDARAvailable == true {
-                lidarManager?.startSession()
-                // Wait a moment for AR to initialize
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    let depthData = self?.lidarManager?.captureDepthData()
-                    self?.lidarManager?.stopSession()
-                    self?.delegate?.didCapturePhoto(image, depthData: depthData)
+            // Capture depth data periodically (every 10 frames to reduce memory)
+            if depthDataBuffer.count < 100 {
+                if let depthData = captureDepthDataFromFrame(frame) {
+                    depthDataBuffer.append(depthData)
                 }
-            } else {
-                delegate?.didCapturePhoto(image, depthData: nil)
             }
-            
-            print("[LiDARManager] Photo captured successfully")
         }
-}
-
-// MARK: - Video Capture Delegate
-extension CameraViewController: AVCaptureFileOutputRecordingDelegate {
-    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let error = error {
-            print("[LiDARManager] Error recording video: \(error.localizedDescription)")
-            return
+    }
+    
+    private func convertPixelBuffer(_ pixelBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        
+        var outputBuffer: CVPixelBuffer?
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 1920,
+            kCVPixelBufferHeightKey as String: 1440
+        ]
+        
+        CVPixelBufferCreate(kCFAllocatorDefault, 1920, 1440, kCVPixelFormatType_32BGRA, attributes as CFDictionary, &outputBuffer)
+        
+        if let output = outputBuffer {
+            context.render(ciImage, to: output)
         }
         
-        // Capture depth data at the end of recording
-        let depthData = lidarManager?.captureDepthData()
-        
-        // Notify delegate
-        delegate?.didCaptureVideo(outputFileURL, depthData: depthData)
-        
-        print("[LiDARManager] Video recorded successfully")
+        return outputBuffer
     }
 }
 
