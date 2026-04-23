@@ -2,9 +2,6 @@
 //  CameraView.swift
 //  LiDARapp
 //
-//  Created by LiDAR Team on 2026
-//  Copyright © 2026 LiDAR Measurement App. All rights reserved.
-//
 //  Camera interface for capturing photos and videos with LiDAR data
 //
 
@@ -135,7 +132,7 @@ struct CameraPreviewView: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {
-        // Update if needed
+
     }
     
     func makeCoordinator() -> Coordinator {
@@ -242,9 +239,7 @@ class CameraViewController: UIViewController {
                 captureSession?.addOutput(photoOutput)
             }
 
-            // Create video output but DON'T add it yet
             videoOutput = AVCaptureMovieFileOutput()
-            // We'll add/remove outputs when switching modes
 
 
             
