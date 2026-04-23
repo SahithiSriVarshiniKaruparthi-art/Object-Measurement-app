@@ -1,10 +1,6 @@
 //
 //  LiDARManager.swift
 //  LiDARapp
-//
-//  Created by LiDAR Team on 2026
-//  Copyright © 2026 LiDAR Measurement App. All rights reserved.
-//
 //  Manages LiDAR sensor detection and depth data capture using ARKit
 //
 
@@ -15,43 +11,25 @@ import Combine
 // MARK: - Constants
 /// Configuration constants for LiDAR depth processing
 private struct LiDARConstants {
-    /// Maximum valid depth range in meters
+    
     static let maxDepthRange: Float = 5.0
-    
-    /// Minimum valid depth in meters
     static let minDepthRange: Float = 0.0
-    
-    /// Surface consistency threshold in meters (10cm)
     static let surfaceThreshold: Float = 0.1
-    
-    /// Neighborhood size for depth point averaging
     static let neighborhoodRadius = 1
-    
-    /// Depth difference threshold for flat surface detection (10cm)
     static let flatSurfaceThreshold: Float = 0.1
-    
-    /// Sample rate for depth map processing
     static let depthSampleRate = 1
 }
 
 // MARK: - LiDAR Manager
 /// Manages LiDAR availability detection and depth data capture
-/// Uses ARKit's scene depth feature which is only available on LiDAR-equipped devices
 class LiDARManager: NSObject, ObservableObject {
     
-    // MARK: - Published Properties
-    /// Whether the current device has LiDAR capability
-    /// This will be true on iPhone 12 Pro and later Pro models, and iPad Pro 2020+
     @Published var isLiDARAvailable: Bool = false
-    
-    /// Whether the AR session is currently running
+
     @Published var isSessionRunning: Bool = false
-    
-    /// The most recent depth data captured
+
     @Published var currentDepthData: DepthData?
-    
-    // MARK: - Private Properties
-    /// ARKit session for capturing depth data
+
     private var arSession: ARSession?
     
     /// Configuration for the AR session
@@ -137,7 +115,6 @@ class LiDARManager: NSObject, ObservableObject {
     
     // MARK: - Depth Map Conversion
     /// Converts ARKit's depth map (CVPixelBuffer) to our DepthData format
-    /// This is a complex operation that extracts 3D coordinates from the depth buffer
     private func convertDepthMap(
         _ depthMap: CVPixelBuffer,
         frame: ARFrame
@@ -156,12 +133,12 @@ class LiDARManager: NSObject, ObservableObject {
 
         let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
 
-        // ✅ Camera info
+        // Camera info
         let intrinsics = frame.camera.intrinsics
         let cameraTransform = frame.camera.transform
         let imageResolution = frame.camera.imageResolution
 
-        // ✅ Scale factors (CRITICAL FIX)
+        // Scale factors
         let scaleX = Float(imageResolution.width)  / Float(depthWidth)
         let scaleY = Float(imageResolution.height) / Float(depthHeight)
 
@@ -183,11 +160,11 @@ class LiDARManager: NSObject, ObservableObject {
                 guard depth > LiDARConstants.minDepthRange && depth < LiDARConstants.maxDepthRange else { continue }
 
 
-                // ✅ Map depth pixel → camera image pixel
+                // Map depth pixel → camera image pixel
                 let imageX = Float(x) * scaleX
                 let imageY = Float(y) * scaleY
 
-                // ✅ Camera‑space projection (intrinsics applied correctly)
+                // Camera‑space projection (intrinsics applied)
                 let cameraX = (imageX - cx) / fx * depth
                 let cameraY = (imageY - cy) / fy * depth
                 let cameraZ = depth
@@ -199,7 +176,7 @@ class LiDARManager: NSObject, ObservableObject {
                     1.0
                 )
 
-                // ✅ Camera space → World space (CRITICAL FIX)
+                // Camera space → World space (CRITICAL FIX)
                 let worldPoint = cameraTransform * cameraPoint
 
                 points.append(
@@ -255,7 +232,7 @@ class LiDARManager: NSObject, ObservableObject {
             return nil
         }
         
-        // Calculate median depth (more robust than average)
+        // Calculate median depth 
         let depths = neighborPoints.map { $0.z }.sorted()
         let medianDepth = depths[depths.count / 2]
         
@@ -369,9 +346,7 @@ extension LiDARManager: ARSessionDelegate {
     /// Called when AR session updates with new frame
     /// We can use this to continuously monitor depth data if needed
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        // This is called every frame (60 FPS)
-        // For POC, we only capture depth when user takes a photo
-        // But you could process depth data here for real-time features
+        
     }
     
     /// Called when AR session fails
@@ -389,7 +364,6 @@ extension LiDARManager: ARSessionDelegate {
     /// Called when AR session interruption ends
     func sessionInterruptionEnded(_ session: ARSession) {
         print("[LiDARManager] AR session interruption ended")
-        // Optionally restart the session
     }
 }
 
