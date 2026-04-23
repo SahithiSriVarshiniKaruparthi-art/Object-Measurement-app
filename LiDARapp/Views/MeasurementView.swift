@@ -1,7 +1,6 @@
 //
 //  MeasurementView.swift
-//  LiDARapp
-//
+// 
 //  Interactive view for measuring distances and bounding boxes on photos
 //
 

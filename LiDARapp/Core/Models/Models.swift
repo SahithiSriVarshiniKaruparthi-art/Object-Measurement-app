@@ -1,7 +1,6 @@
 //
 //  Models.swift
-//  LiDARapp
-//
+
 //  Data models for the LiDAR app
 //
 
@@ -30,7 +29,7 @@ struct MediaItem: Identifiable, Codable {
     let hasLiDARData: Bool
 
     let depthDataFileName: String?
- 
+
     var measurements: [Measurement]
     
     /// Initializer with default values
@@ -59,15 +58,12 @@ enum MeasurementType: String, Codable {
 }
 
 // MARK: - Measurement Model
-/// Represents a single measurement taken on a media item
 struct Measurement: Identifiable, Codable {
 
     let id: UUID
 
     let type: MeasurementType
-    
-    /// The calculated value in meters
-    /// For distance: the distance between two points
+ 
     let value: Double
     
     /// For bounding box measurements, stores the height in meters
@@ -77,7 +73,8 @@ struct Measurement: Identifiable, Codable {
     /// For distance: 2 points [start, end]
     /// For bounding box: 4 points [topLeft, topRight, bottomRight, bottomLeft]
     let screenPoints: [CGPoint]
-
+    
+    /// When this measurement was taken
     let createdAt: Date
     
     /// Human-readable description of the measurement
@@ -114,8 +111,7 @@ struct DepthPoint: Codable {
     let x: Float
 
     let y: Float
-    
-    /// Z coordinate (depth) in 3D space (meters)
+
     /// This is the distance from the camera to the point
     let z: Float
     
@@ -132,13 +128,16 @@ struct DepthPoint: Codable {
 /// Container for depth data captured from LiDAR sensor
 /// This stores the 3D point cloud data
 struct DepthData: Codable {
-
+    /// Array of 3D points captured by the LiDAR sensor
     let points: [DepthPoint]
-
+    
+    /// Width of the depth map (in pixels)
     let width: Int
-
+    
+    /// Height of the depth map (in pixels)
     let height: Int
-
+    
+    /// When this depth data was captured
     let capturedAt: Date
     
     /// Get depth point at specific screen coordinates

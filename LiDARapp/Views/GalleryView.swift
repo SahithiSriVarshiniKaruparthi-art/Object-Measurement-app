@@ -1,7 +1,6 @@
 //
 //  GalleryView.swift
-//  LiDARapp
-//
+//  
 //  Gallery view to display all captured photos and videos
 //
 

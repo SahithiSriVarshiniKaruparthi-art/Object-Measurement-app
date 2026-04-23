@@ -1,7 +1,5 @@
 //
 //  ContentView.swift
-//  LiDARapp
-//
 //  Main app interface with Camera and Gallery tabs
 //
 
@@ -10,6 +8,7 @@ import SwiftUI
 // MARK: - Content View
 /// Main app view with tab navigation
 struct ContentView: View {
+    // Track the selected tab
     @State private var selectedTab = 0
     
     var body: some View {
@@ -32,7 +31,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Preview
+
 #Preview {
     ContentView()
 }
