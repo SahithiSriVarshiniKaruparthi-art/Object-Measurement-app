@@ -488,7 +488,6 @@ class ARCameraViewController: UIViewController {
         let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
         
         let intrinsics = frame.camera.intrinsics
-        let cameraTransform = frame.camera.transform
         let imageResolution = frame.camera.imageResolution
         
         let scaleX = Float(imageResolution.width) / Float(depthWidth)
@@ -502,6 +501,9 @@ class ARCameraViewController: UIViewController {
         var points: [DepthPoint] = []
         let sampleRate = 1
         
+        print("[CameraView] Converting depth map: \(depthWidth)x\(depthHeight)")
+        print("[CameraView] Camera intrinsics: fx=\(fx), fy=\(fy), cx=\(cx), cy=\(cy)")
+        
         for y in stride(from: 0, to: depthHeight, by: sampleRate) {
             for x in stride(from: 0, to: depthWidth, by: sampleRate) {
                 let index = y * depthWidth + x
@@ -509,24 +511,41 @@ class ARCameraViewController: UIViewController {
                 
                 guard depth > 0.0 && depth < 5.0 else { continue }
                 
+                // Map depth pixel to image pixel coordinates
                 let imageX = Float(x) * scaleX
                 let imageY = Float(y) * scaleY
                 
+                // Convert to camera coordinates (3D point relative to camera)
+                // This is the correct coordinate system for photo measurements
                 let cameraX = (imageX - cx) / fx * depth
                 let cameraY = (imageY - cy) / fy * depth
                 let cameraZ = depth
                 
-                let cameraPoint = simd_float4(cameraX, cameraY, cameraZ, 1.0)
-                let worldPoint = cameraTransform * cameraPoint
-                
-                points.append(DepthPoint(x: worldPoint.x, y: worldPoint.y, z: worldPoint.z))
+                // Store CAMERA coordinates (not world coordinates)
+                // For photo measurements, we want coordinates relative to the camera
+                // that took the photo, not world space coordinates
+                points.append(DepthPoint(
+                    x: cameraX,
+                    y: cameraY,
+                    z: cameraZ,
+                    pixelX: x,
+                    pixelY: y
+                ))
             }
         }
+        
+        print("[CameraView] Converted \(points.count) depth points")
+        
+        // Create camera intrinsics object
+        let cameraIntrinsics = CameraIntrinsics(from: intrinsics)
         
         return DepthData(
             points: points,
             width: depthWidth / sampleRate,
             height: depthHeight / sampleRate,
+            cameraIntrinsics: cameraIntrinsics,
+            imageResolution: CGSize(width: imageResolution.width, height: imageResolution.height),
+            depthResolution: CGSize(width: depthWidth, height: depthHeight),
             capturedAt: Date()
         )
     }
