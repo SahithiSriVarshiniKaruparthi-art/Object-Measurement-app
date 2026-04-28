@@ -211,6 +211,28 @@ class DataStore: ObservableObject {
         print("[DataStore] Deleted media item: \(mediaItem.fileName)")
     }
     
+    // MARK: - Delete All Media Items
+    /// Deletes all media items and their associated files
+    func deleteAllMediaItems() {
+        // Delete all media files
+        for mediaItem in mediaItems {
+            let mediaFileURL = mediaDirectory.appendingPathComponent(mediaItem.fileName)
+            try? FileManager.default.removeItem(at: mediaFileURL)
+            
+            // Delete depth data file if exists
+            if let depthFileName = mediaItem.depthDataFileName {
+                let depthFileURL = depthDirectory.appendingPathComponent(depthFileName)
+                try? FileManager.default.removeItem(at: depthFileURL)
+            }
+        }
+        
+        // Clear the array
+        mediaItems.removeAll()
+        saveMediaItems()
+        
+        print("[DataStore] Deleted all \(mediaItems.count) media items")
+    }
+    
     // MARK: - Get File URLs
     /// - Parameter mediaItem: The media item
     /// - Returns: URL to the media file

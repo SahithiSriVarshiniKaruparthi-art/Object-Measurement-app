@@ -61,13 +61,15 @@ class LiDARManager: ObservableObject {
         
         print("[LiDARManager] === Starting coordinate transformation ===")
         print("[LiDARManager] Input: Normalized screen point (\(String(format: "%.3f", normalizedX)), \(String(format: "%.3f", normalizedY)))")
+        print("[LiDARManager] Image orientation: \(depthData.imageOrientation.rawValue)")
         
-        // Step 1: Convert normalized coordinates to image pixel coordinates
-        // The normalized point is relative to the displayed image bounds
-        let imagePixelX = Float(normalizedX) * Float(depthData.imageResolution.width)
-        let imagePixelY = Float(normalizedY) * Float(depthData.imageResolution.height)
+        // Step 1: Convert normalized coordinates to ORIENTED image pixel coordinates
+        // The normalized point is relative to the displayed (oriented) image bounds
+        let orientedResolution = depthData.orientedImageResolution
+        let imagePixelX = Float(normalizedX) * Float(orientedResolution.width)
+        let imagePixelY = Float(normalizedY) * Float(orientedResolution.height)
         
-        print("[LiDARManager] Step 1: Image pixel (\(String(format: "%.1f", imagePixelX)), \(String(format: "%.1f", imagePixelY))) in \(Int(depthData.imageResolution.width))x\(Int(depthData.imageResolution.height))")
+        print("[LiDARManager] Step 1: Oriented image pixel (\(String(format: "%.1f", imagePixelX)), \(String(format: "%.1f", imagePixelY))) in \(Int(orientedResolution.width))x\(Int(orientedResolution.height))")
         
         // Step 2: Find the closest depth point using the new method
         // This handles the mapping from image space to depth space internally
@@ -78,54 +80,10 @@ class LiDARManager: ObservableObject {
         
         print("[LiDARManager] Step 2: Found depth point at depth pixel (\(closestPoint.pixelX), \(closestPoint.pixelY))")
         
-        // Step 3: Get neighborhood points for surface averaging
-        var neighborPoints: [DepthPoint] = []
-        let radius = 2
+        // Step 3: Use the single closest point directly (no averaging for precise crack measurements)
+        let finalPoint = closestPoint
         
-        for dy in -radius...radius {
-            for dx in -radius...radius {
-                let nx = closestPoint.pixelX + dx
-                let ny = closestPoint.pixelY + dy
-                
-                if let point = depthData.point(at: nx, y: ny) {
-                    neighborPoints.append(point)
-                }
-            }
-        }
-        
-        guard !neighborPoints.isEmpty else {
-            print("[LiDARManager] ❌ No neighbor points found")
-            return nil
-        }
-        
-        print("[LiDARManager] Step 3: Found \(neighborPoints.count) neighbor points")
-        
-        // Step 4: Calculate median depth for robust surface detection
-        let depths = neighborPoints.map { $0.z }.sorted()
-        let medianDepth = depths[depths.count / 2]
-        
-        print("[LiDARManager] Step 4: Median depth = \(String(format: "%.3f", medianDepth))m")
-        
-        // Step 5: Filter points on the same surface (within threshold)
-        let surfacePoints = neighborPoints.filter { abs($0.z - medianDepth) < LiDARConstants.surfaceThreshold }
-        
-        guard !surfacePoints.isEmpty else {
-            print("[LiDARManager] ❌ No consistent surface found (threshold: \(LiDARConstants.surfaceThreshold)m)")
-            return nil
-        }
-        
-        // Step 6: Average the surface points for final 3D world position
-        let avgX = surfacePoints.map { $0.x }.reduce(0, +) / Float(surfacePoints.count)
-        let avgY = surfacePoints.map { $0.y }.reduce(0, +) / Float(surfacePoints.count)
-        let avgZ = surfacePoints.map { $0.z }.reduce(0, +) / Float(surfacePoints.count)
-        
-        // Get average pixel coordinates for the result
-        let avgPixelX = surfacePoints.map { $0.pixelX }.reduce(0, +) / surfacePoints.count
-        let avgPixelY = surfacePoints.map { $0.pixelY }.reduce(0, +) / surfacePoints.count
-        
-        let finalPoint = DepthPoint(x: avgX, y: avgY, z: avgZ, pixelX: avgPixelX, pixelY: avgPixelY)
-        
-        print("[LiDARManager] Step 6: Averaged \(surfacePoints.count) surface points")
+        print("[LiDARManager] Step 3: Using single depth point (no neighborhood averaging)")
         print("[LiDARManager] ✅ Final 3D camera point: x=\(String(format: "%.3f", finalPoint.x))m, y=\(String(format: "%.3f", finalPoint.y))m, z=\(String(format: "%.3f", finalPoint.z))m (depth)")
         print("[LiDARManager] === Transformation complete ===")
         

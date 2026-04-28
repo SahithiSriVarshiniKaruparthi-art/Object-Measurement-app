@@ -232,8 +232,8 @@ struct MeasurementView: View {
     private func calculateDistance(depthData: DepthData) {
         guard selectedPoints.count == 2 else { return }
         
-        // Use the original image size from depth data for accurate mapping
-        let imageSize = depthData.imageResolution
+        // Use the ORIENTED image size from depth data for accurate mapping
+        let imageSize = depthData.orientedImageResolution
         
         if let distanceCm = lidarManager.calculateDistance(
             from: selectedPoints[0],
@@ -252,8 +252,8 @@ struct MeasurementView: View {
     private func calculateBoundingBox(depthData: DepthData) {
         guard selectedPoints.count == 4 else { return }
         
-        // Use the original image size from depth data for accurate mapping
-        let imageSize = depthData.imageResolution
+        // Use the ORIENTED image size from depth data for accurate mapping
+        let imageSize = depthData.orientedImageResolution
         
         if let dimensions = lidarManager.calculateBoundingBox(
             topLeft: selectedPoints[0],
@@ -279,7 +279,7 @@ struct MeasurementView: View {
         guard let depthData = depthData else { return }
         
         let measurement: Measurement
-        let imageSize = depthData.imageResolution
+        let imageSize = depthData.orientedImageResolution
         
         switch measurementMode {
         case .distance:

@@ -7,6 +7,7 @@
 import Foundation
 import CoreGraphics
 import simd
+import UIKit
 
 // MARK: - Media Type Enum
 /// Defines the type of media captured
@@ -149,12 +150,13 @@ struct CameraIntrinsics: Codable {
         self.cy = cy
     }
     
-    /// Initialize from simd_float3x3 matrix
+    /// Initialize from simd_float3x3 matrix (column-major)
     init(from matrix: simd_float3x3) {
-        self.fx = matrix[0, 0]
-        self.fy = matrix[1, 1]
-        self.cx = matrix[2, 0]
-        self.cy = matrix[2, 1]
+        // FIXED: simd_float3x3 is column-major, so access [column, row]
+        self.fx = matrix[0, 0]  // Column 0, Row 0
+        self.fy = matrix[1, 1]  // Column 1, Row 1
+        self.cx = matrix[0, 2]  // Column 0, Row 2 (principal point X)
+        self.cy = matrix[1, 2]  // Column 1, Row 2 (principal point Y)
     }
 }
 
@@ -162,7 +164,7 @@ struct CameraIntrinsics: Codable {
 /// Container for depth data captured from LiDAR sensor
 /// This stores the 3D point cloud data with camera metadata for accurate measurements
 struct DepthData: Codable {
-    /// Array of 3D points captured by the LiDAR sensor (in world coordinates)
+    /// Array of 3D points captured by the LiDAR sensor (in camera coordinates)
     let points: [DepthPoint]
     
     /// Width of the depth map (in pixels)
@@ -174,7 +176,7 @@ struct DepthData: Codable {
     /// Camera intrinsic parameters (focal length, principal point)
     let cameraIntrinsics: CameraIntrinsics
     
-    /// Original camera image resolution
+    /// Original camera image resolution (BEFORE orientation adjustment)
     let imageResolution: CGSize
     
     /// Depth map resolution
@@ -182,6 +184,53 @@ struct DepthData: Codable {
     
     /// When this depth data was captured
     let capturedAt: Date
+    
+    /// Image orientation raw value (stored as Int for Codable compatibility)
+    /// Defaults to 0 (.up) for backward compatibility with old data
+    private var imageOrientationRawValue: Int = 0
+    
+    /// Image orientation when captured (to properly align depth with displayed image)
+    var imageOrientation: UIImage.Orientation {
+        get {
+            return UIImage.Orientation(rawValue: imageOrientationRawValue) ?? .up
+        }
+        set {
+            imageOrientationRawValue = newValue.rawValue
+        }
+    }
+    
+    /// Custom initializer
+    init(points: [DepthPoint],
+         width: Int,
+         height: Int,
+         cameraIntrinsics: CameraIntrinsics,
+         imageResolution: CGSize,
+         depthResolution: CGSize,
+         capturedAt: Date,
+         imageOrientation: UIImage.Orientation = .up) {
+        self.points = points
+        self.width = width
+        self.height = height
+        self.cameraIntrinsics = cameraIntrinsics
+        self.imageResolution = imageResolution
+        self.depthResolution = depthResolution
+        self.capturedAt = capturedAt
+        self.imageOrientationRawValue = imageOrientation.rawValue
+    }
+    
+    /// Returns the oriented image resolution (accounting for rotation)
+    var orientedImageResolution: CGSize {
+        switch imageOrientation {
+        case .up, .down, .upMirrored, .downMirrored:
+            // No dimension swap needed
+            return imageResolution
+        case .left, .right, .leftMirrored, .rightMirrored:
+            // Dimensions are swapped for 90° rotations
+            return CGSize(width: imageResolution.height, height: imageResolution.width)
+        @unknown default:
+            return imageResolution
+        }
+    }
     
     /// Get depth point at specific depth map pixel coordinates
     /// - Parameters:
@@ -195,20 +244,58 @@ struct DepthData: Codable {
         return points[index]
     }
     
-    /// Find the closest depth point to a given image pixel coordinate
-    /// This properly handles the mapping from image space to depth space
+    /// Transform oriented image coordinates back to original camera buffer coordinates
     /// - Parameters:
-    ///   - imageX: X coordinate in image space (0 to imageResolution.width)
-    ///   - imageY: Y coordinate in image space (0 to imageResolution.height)
+    ///   - x: X coordinate in oriented image space
+    ///   - y: Y coordinate in oriented image space
+    /// - Returns: Tuple of (x, y) in original camera buffer space
+    func transformToOriginalCoordinates(orientedX: Float, orientedY: Float) -> (x: Float, y: Float) {
+        let orientedWidth = Float(orientedImageResolution.width)
+        let orientedHeight = Float(orientedImageResolution.height)
+        let originalWidth = Float(imageResolution.width)
+        let originalHeight = Float(imageResolution.height)
+        
+        // Transform based on orientation
+        switch imageOrientation {
+        case .up:
+            // No transformation needed
+            return (orientedX, orientedY)
+            
+        case .right:
+            // 90° clockwise: (x,y) -> (height-y, x)
+            return (orientedHeight - orientedY, orientedX)
+            
+        case .left:
+            // 90° counter-clockwise: (x,y) -> (y, width-x)
+            return (orientedY, orientedWidth - orientedX)
+            
+        case .down:
+            // 180°: (x,y) -> (width-x, height-y)
+            return (orientedWidth - orientedX, orientedHeight - orientedY)
+            
+        default:
+            // For mirrored orientations, use the base transformation
+            return (orientedX, orientedY)
+        }
+    }
+    
+    /// Find the closest depth point to a given image pixel coordinate
+    /// This properly handles the mapping from oriented image space to depth space
+    /// - Parameters:
+    ///   - imageX: X coordinate in ORIENTED image space (0 to orientedImageResolution.width)
+    ///   - imageY: Y coordinate in ORIENTED image space (0 to orientedImageResolution.height)
     ///   - searchRadius: Radius in pixels to search for valid depth points
     /// - Returns: The closest valid depth point, or nil if none found
     func findClosestPoint(toImagePixel imageX: Float, imageY: Float, searchRadius: Int = 3) -> DepthPoint? {
-        // Map image coordinates to depth map coordinates
+        // Step 1: Transform from oriented image coordinates to original camera buffer coordinates
+        let (originalX, originalY) = transformToOriginalCoordinates(orientedX: imageX, orientedY: imageY)
+        
+        // Step 2: Map original camera coordinates to depth map coordinates
         let scaleX = Float(depthResolution.width) / Float(imageResolution.width)
         let scaleY = Float(depthResolution.height) / Float(imageResolution.height)
         
-        let depthX = Int(imageX * scaleX)
-        let depthY = Int(imageY * scaleY)
+        let depthX = Int(originalX * scaleX)
+        let depthY = Int(originalY * scaleY)
         
         // Search in a neighborhood for valid points
         var candidates: [(point: DepthPoint, distance: Float)] = []
