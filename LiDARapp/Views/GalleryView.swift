@@ -12,6 +12,7 @@ import AVFoundation
 struct GalleryView: View {
     @ObservedObject var dataStore = DataStore.shared
     @State private var selectedItem: MediaItem?
+    @State private var showDeleteAllAlert = false
     
     // Grid layout - 3 columns
     let columns = [
@@ -43,11 +44,30 @@ struct GalleryView: View {
             }
             .navigationTitle("Gallery")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !dataStore.mediaItems.isEmpty {
+                        Button(role: .destructive) {
+                            showDeleteAllAlert = true
+                        } label: {
+                            Label("Delete All", systemImage: "trash")
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Text("\(dataStore.mediaItems.count) items")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+            }
+            .alert("Delete All Photos?", isPresented: $showDeleteAllAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete All", role: .destructive) {
+                    dataStore.deleteAllMediaItems()
+                }
+            } message: {
+                Text("This will permanently delete all \(dataStore.mediaItems.count) photos and videos. This action cannot be undone.")
             }
             .sheet(item: $selectedItem) { item in
                 // Show detail card when item is tapped

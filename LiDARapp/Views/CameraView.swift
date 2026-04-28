@@ -359,14 +359,37 @@ class ARCameraViewController: UIViewController {
         // Capture the camera image
         let pixelBuffer = frame.capturedImage
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
         
+        // Get device orientation to properly orient the image
+        let deviceOrientation = UIDevice.current.orientation
+        let imageOrientation: UIImage.Orientation
+        
+        // ARKit camera buffer is in landscape right orientation by default
+        // We need to rotate it based on device orientation
+        switch deviceOrientation {
+        case .portrait:
+            imageOrientation = .right  // Rotate 90° clockwise
+        case .portraitUpsideDown:
+            imageOrientation = .left   // Rotate 90° counter-clockwise
+        case .landscapeLeft:
+            imageOrientation = .up     // No rotation needed
+        case .landscapeRight:
+            imageOrientation = .down   // Rotate 180°
+        default:
+            // Default to portrait mode if orientation is unknown
+            imageOrientation = .right
+        }
+        
+        let context = CIContext()
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
             print("[ARCameraView] Failed to create CGImage")
             return
         }
         
-        let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+        // Create image with proper orientation
+        let image = UIImage(cgImage: cgImage, scale: 1.0, orientation: imageOrientation)
+        
+        print("[ARCameraView] Captured photo with orientation: \(imageOrientation.rawValue) (device: \(deviceOrientation.rawValue))")
         
         // Capture depth data
         let depthData = captureDepthDataFromFrame(frame)
@@ -472,10 +495,27 @@ class ARCameraViewController: UIViewController {
             return nil
         }
         
-        return convertDepthMap(depthMap, frame: frame)
+        // Get current device orientation for depth data
+        let deviceOrientation = UIDevice.current.orientation
+        let imageOrientation: UIImage.Orientation
+        
+        switch deviceOrientation {
+        case .portrait:
+            imageOrientation = .right
+        case .portraitUpsideDown:
+            imageOrientation = .left
+        case .landscapeLeft:
+            imageOrientation = .up
+        case .landscapeRight:
+            imageOrientation = .down
+        default:
+            imageOrientation = .right
+        }
+        
+        return convertDepthMap(depthMap, frame: frame, orientation: imageOrientation)
     }
     
-    private func convertDepthMap(_ depthMap: CVPixelBuffer, frame: ARFrame) -> DepthData? {
+    private func convertDepthMap(_ depthMap: CVPixelBuffer, frame: ARFrame, orientation: UIImage.Orientation) -> DepthData? {
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
         
@@ -488,19 +528,22 @@ class ARCameraViewController: UIViewController {
         let depthPointer = baseAddress.assumingMemoryBound(to: Float32.self)
         
         let intrinsics = frame.camera.intrinsics
-        let cameraTransform = frame.camera.transform
         let imageResolution = frame.camera.imageResolution
         
         let scaleX = Float(imageResolution.width) / Float(depthWidth)
         let scaleY = Float(imageResolution.height) / Float(depthHeight)
         
-        let fx = intrinsics[0, 0]
-        let fy = intrinsics[1, 1]
-        let cx = intrinsics[2, 0]
-        let cy = intrinsics[2, 1]
+        // simd_float3x3 is column-major, so access [column, row]
+        let fx = intrinsics[0, 0]  // Column 0, Row 0
+        let fy = intrinsics[1, 1]  // Column 1, Row 1
+        let cx = intrinsics[0, 2]  // Column 0, Row 2 (principal point X)
+        let cy = intrinsics[1, 2]  // Column 1, Row 2 (principal point Y)
         
         var points: [DepthPoint] = []
         let sampleRate = 1
+        
+        print("[CameraView] Converting depth map: \(depthWidth)x\(depthHeight)")
+        print("[CameraView] Camera intrinsics: fx=\(fx), fy=\(fy), cx=\(cx), cy=\(cy)")
         
         for y in stride(from: 0, to: depthHeight, by: sampleRate) {
             for x in stride(from: 0, to: depthWidth, by: sampleRate) {
@@ -509,25 +552,43 @@ class ARCameraViewController: UIViewController {
                 
                 guard depth > 0.0 && depth < 5.0 else { continue }
                 
+                // Map depth pixel to image pixel coordinates
                 let imageX = Float(x) * scaleX
                 let imageY = Float(y) * scaleY
                 
+                // Convert to camera coordinates (3D point relative to camera)
+                // This is the correct coordinate system for photo measurements
                 let cameraX = (imageX - cx) / fx * depth
                 let cameraY = (imageY - cy) / fy * depth
                 let cameraZ = depth
                 
-                let cameraPoint = simd_float4(cameraX, cameraY, cameraZ, 1.0)
-                let worldPoint = cameraTransform * cameraPoint
-                
-                points.append(DepthPoint(x: worldPoint.x, y: worldPoint.y, z: worldPoint.z))
+                // Store CAMERA coordinates (not world coordinates)
+                // For photo measurements, we want coordinates relative to the camera
+                // that took the photo, not world space coordinates
+                points.append(DepthPoint(
+                    x: cameraX,
+                    y: cameraY,
+                    z: cameraZ,
+                    pixelX: x,
+                    pixelY: y
+                ))
             }
         }
+        
+        print("[CameraView] Converted \(points.count) depth points")
+        
+        // Create camera intrinsics object
+        let cameraIntrinsics = CameraIntrinsics(from: intrinsics)
         
         return DepthData(
             points: points,
             width: depthWidth / sampleRate,
             height: depthHeight / sampleRate,
-            capturedAt: Date()
+            cameraIntrinsics: cameraIntrinsics,
+            imageResolution: CGSize(width: imageResolution.width, height: imageResolution.height),
+            depthResolution: CGSize(width: depthWidth, height: depthHeight),
+            capturedAt: Date(),
+            imageOrientation: orientation
         )
     }
     
