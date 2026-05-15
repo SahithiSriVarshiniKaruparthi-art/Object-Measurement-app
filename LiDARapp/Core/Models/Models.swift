@@ -57,6 +57,7 @@ struct MediaItem: Identifiable, Codable {
 enum MeasurementType: String, Codable {
     case distance = "distance"        // Point-to-point distance
     case boundingBox = "boundingBox"  // Width and height of a box
+    case path = "path"                // Multi-point traced path length
 }
 
 // MARK: - Measurement Model
@@ -74,6 +75,7 @@ struct Measurement: Identifiable, Codable {
     /// The 2D screen coordinates where user tapped/drew
     /// For distance: 2 points [start, end]
     /// For bounding box: 4 points [topLeft, topRight, bottomRight, bottomLeft]
+    /// For path: N points in trace order
     let screenPoints: [CGPoint]
     
     /// When this measurement was taken
@@ -83,15 +85,16 @@ struct Measurement: Identifiable, Codable {
     var description: String {
         switch type {
         case .distance:
-            // Value is stored in cm
             let meters = value / 100.0
             return String(format: "Distance: %.1f cm (%.2f m)", value, meters)
         case .boundingBox:
-            // Values are stored in cm
             let height = secondaryValue ?? 0
             let widthM = value / 100.0
             let heightM = height / 100.0
             return String(format: "Box: %.1f cm × %.1f cm (%.2f m × %.2f m)", value, height, widthM, heightM)
+        case .path:
+            let meters = value / 100.0
+            return String(format: "Path Length: %.1f cm (%.2f m)", value, meters)
         }
     }
     
