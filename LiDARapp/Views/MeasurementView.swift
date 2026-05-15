@@ -40,9 +40,11 @@ struct MeasurementView: View {
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                handleGestureChanged(at: value.location, in: geometry.size, imageFrame: imageFrame)
+                            }
                             .onEnded { value in
-                                print("[MeasurementView] Tap at: \(value.location) in view size: \(geometry.size)")
-                                handleTap(at: value.location, in: geometry.size, imageFrame: imageFrame)
+                                handleGestureEnded(at: value.location, in: geometry.size, imageFrame: imageFrame)
                             }
                     )
                     .overlay(
@@ -62,6 +64,7 @@ struct MeasurementView: View {
                     Picker("Mode", selection: $measurementMode) {
                         Text("Distance").tag(MeasurementMode.distance)
                         Text("Box").tag(MeasurementMode.boundingBox)
+                        Text("Trace").tag(MeasurementMode.path)
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 250)
@@ -88,14 +91,31 @@ struct MeasurementView: View {
                 Spacer()
                     .allowsHitTesting(false)  // Spacer shouldn't block taps
                 
-                InstructionsView(
-                    mode: measurementMode,
-                    pointsCount: selectedPoints.count
-                )
-                .padding()
-                .background(Color.black.opacity(0.7))
-                .cornerRadius(12)
-                .padding()
+                VStack(spacing: 12) {
+                    if measurementMode == .path {
+                        Button(action: finishPathMeasurement) {
+                            Label("Finish Trace", systemImage: "checkmark")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(selectedPoints.count >= 2 ? Color.orange : Color.gray)
+                                .cornerRadius(12)
+                        }
+                        .disabled(selectedPoints.count < 2 || isMeasuring)
+                        .padding(.horizontal)
+                    }
+                    
+                    InstructionsView(
+                        mode: measurementMode,
+                        pointsCount: selectedPoints.count
+                    )
+                    .padding()
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
+                .padding(.bottom)
             }
             
             // LAYER 3: Result overlay (if showing)
@@ -164,41 +184,88 @@ struct MeasurementView: View {
         return imageFrame
     }
     
-    // MARK: - Handle Tap
+    // MARK: - Gesture Handling
+    private func handleGestureChanged(at location: CGPoint, in viewSize: CGSize, imageFrame: CGRect) {
+        guard !isMeasuring else { return }
+        
+        switch measurementMode {
+        case .distance, .boundingBox:
+            break
+        case .path:
+            appendPathPoint(from: location, imageFrame: imageFrame)
+        }
+    }
+    
+    private func handleGestureEnded(at location: CGPoint, in viewSize: CGSize, imageFrame: CGRect) {
+        guard !isMeasuring else { return }
+        
+        switch measurementMode {
+        case .distance, .boundingBox:
+            handleTap(at: location, in: viewSize, imageFrame: imageFrame)
+        case .path:
+            appendPathPoint(from: location, imageFrame: imageFrame)
+        }
+    }
+    
     /// Handles user taps to add measurement points
     private func handleTap(at location: CGPoint, in viewSize: CGSize, imageFrame: CGRect) {
         print("[MeasurementView] === Tap Handler ===")
         print("[MeasurementView] Tap at: \(location) in view size: \(viewSize)")
         guard !isMeasuring else { return }
         
-        // Check if tap is within the actual image bounds
-        guard imageFrame.contains(location) else {
+        guard let normalizedPoint = normalizedImagePoint(for: location, in: imageFrame) else {
             print("[MeasurementView] ❌ Tap outside image bounds (letterbox/pillarbox area)")
             return
         }
         
-        // Convert tap location to normalized coordinates relative to the IMAGE (not the view)
+        print("[MeasurementView] Normalized to image: (\(String(format: "%.3f", normalizedPoint.x)), \(String(format: "%.3f", normalizedPoint.y)))")
+        
+        selectedPoints.append(normalizedPoint)
+        
+        switch measurementMode {
+        case .distance:
+            if selectedPoints.count == 2 {
+                calculateMeasurement()
+            }
+        case .boundingBox:
+            if selectedPoints.count == 4 {
+                calculateMeasurement()
+            }
+        case .path:
+            break
+        }
+    }
+    
+    private func appendPathPoint(from location: CGPoint, imageFrame: CGRect) {
+        guard let normalizedPoint = normalizedImagePoint(for: location, in: imageFrame) else {
+            return
+        }
+        
+        if let lastPoint = selectedPoints.last {
+            let dx = normalizedPoint.x - lastPoint.x
+            let dy = normalizedPoint.y - lastPoint.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            if distance < 0.003 {
+                return
+            }
+        }
+        
+        selectedPoints.append(normalizedPoint)
+    }
+    
+    private func normalizedImagePoint(for location: CGPoint, in imageFrame: CGRect) -> CGPoint? {
+        guard imageFrame.contains(location) else { return nil }
+        
         let normalizedPoint = CGPoint(
             x: (location.x - imageFrame.origin.x) / imageFrame.width,
             y: (location.y - imageFrame.origin.y) / imageFrame.height
         )
         
-        // Clamp to 0-1 range
-        let clampedPoint = CGPoint(
+        return CGPoint(
             x: max(0, min(1, normalizedPoint.x)),
             y: max(0, min(1, normalizedPoint.y))
         )
-        
-        print("[MeasurementView] Normalized to image: (\(String(format: "%.3f", clampedPoint.x)), \(String(format: "%.3f", clampedPoint.y)))")
-        
-        selectedPoints.append(clampedPoint)
-        
-        // Check if we have enough points to calculate
-        let requiredPoints = measurementMode == .distance ? 2 : 4
-        
-        if selectedPoints.count == requiredPoints {
-            calculateMeasurement()
-        }
     }
 
     
@@ -220,6 +287,8 @@ struct MeasurementView: View {
                 calculateDistance(depthData: depthData)
             case .boundingBox:
                 calculateBoundingBox(depthData: depthData)
+            case .path:
+                calculatePathLength(depthData: depthData)
             }
             
             isMeasuring = false
@@ -245,6 +314,24 @@ struct MeasurementView: View {
             measurementResult = String(format: "Distance: %.1f cm\n(%.2f meters)", distanceCm, distanceM)
         } else {
             measurementResult = "❌ Could not calculate distance"
+        }
+    }
+    
+    /// Calculates total traced path length
+    private func calculatePathLength(depthData: DepthData) {
+        guard selectedPoints.count >= 2 else { return }
+        
+        let imageSize = depthData.orientedImageResolution
+        
+        if let pathLengthCm = lidarManager.calculatePathLength(
+            from: selectedPoints,
+            using: depthData,
+            imageSize: imageSize
+        ) {
+            let pathLengthM = pathLengthCm / 100.0
+            measurementResult = String(format: "Path Length: %.1f cm\n(%.2f meters)", pathLengthCm, pathLengthM)
+        } else {
+            measurementResult = "❌ Could not calculate path length"
         }
     }
     
@@ -291,7 +378,6 @@ struct MeasurementView: View {
                     imageSize: imageSize
                   ) else { return }
             
-            // Store in centimeters
             measurement = Measurement(
                 type: .distance,
                 value: distanceCm,
@@ -309,11 +395,24 @@ struct MeasurementView: View {
                     imageSize: imageSize
                   ) else { return }
             
-            // Store in centimeters
             measurement = Measurement(
                 type: .boundingBox,
                 value: dimensions.width,
                 secondaryValue: dimensions.height,
+                screenPoints: selectedPoints
+            )
+            
+        case .path:
+            guard selectedPoints.count >= 2,
+                  let pathLengthCm = lidarManager.calculatePathLength(
+                    from: selectedPoints,
+                    using: depthData,
+                    imageSize: imageSize
+                  ) else { return }
+            
+            measurement = Measurement(
+                type: .path,
+                value: pathLengthCm,
                 screenPoints: selectedPoints
             )
         }
@@ -327,6 +426,11 @@ struct MeasurementView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             dismiss()
         }
+    }
+    
+    private func finishPathMeasurement() {
+        guard measurementMode == .path, selectedPoints.count >= 2, !isMeasuring else { return }
+        calculateMeasurement()
     }
     
     // MARK: - Reset
@@ -343,6 +447,7 @@ struct MeasurementView: View {
 enum MeasurementMode {
     case distance      // Point-to-point distance
     case boundingBox   // Width and height of a box
+    case path          // Multi-point traced path length
 }
 
 // MARK: - Measurement Overlay
@@ -369,6 +474,8 @@ struct MeasurementOverlay: View {
                 drawDistanceMode(context: context, points: actualPoints)
             case .boundingBox:
                 drawBoundingBoxMode(context: context, points: actualPoints)
+            case .path:
+                drawPathMode(context: context, points: actualPoints)
             }
         }
     }
@@ -390,6 +497,26 @@ struct MeasurementOverlay: View {
             path.addLine(to: points[1])
             context.stroke(path, with: .color(.blue), lineWidth: 3)
         }
+    }
+    
+    /// Draws traced path measurement as a continuous stroke
+    private func drawPathMode(context: GraphicsContext, points: [CGPoint]) {
+        guard !points.isEmpty else { return }
+        
+        if points.count == 1 {
+            let circle = Circle()
+                .path(in: CGRect(x: points[0].x - 9, y: points[0].y - 9, width: 18, height: 18))
+            context.fill(circle, with: .color(.orange))
+            context.stroke(circle, with: .color(.white), lineWidth: 2)
+            return
+        }
+        
+        var path = Path()
+        path.move(to: points[0])
+        for index in 1..<points.count {
+            path.addLine(to: points[index])
+        }
+        context.stroke(path, with: .color(.orange), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
     }
     
     /// Draws bounding box measurement (rectangle with four corners)
@@ -434,10 +561,10 @@ struct InstructionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: mode == .distance ? "ruler" : "square.dashed")
+                Image(systemName: iconName)
                     .foregroundColor(.white)
                 
-                Text(mode == .distance ? "Distance Mode" : "Bounding Box Mode")
+                Text(titleText)
                     .font(.headline)
                     .foregroundColor(.white)
             }
@@ -445,6 +572,28 @@ struct InstructionsView: View {
             Text(instructionText)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.9))
+        }
+    }
+    
+    private var titleText: String {
+        switch mode {
+        case .distance:
+            return "Distance Mode"
+        case .boundingBox:
+            return "Bounding Box Mode"
+        case .path:
+            return "Trace Mode"
+        }
+    }
+    
+    private var iconName: String {
+        switch mode {
+        case .distance:
+            return "ruler"
+        case .boundingBox:
+            return "square.dashed"
+        case .path:
+            return "point.3.connected.trianglepath.dotted"
         }
     }
     
@@ -471,6 +620,16 @@ struct InstructionsView: View {
                 return "Tap to select bottom-left corner"
             default:
                 return "Calculating dimensions..."
+            }
+            
+        case .path:
+            switch pointsCount {
+            case 0:
+                return "Press and drag continuously along the crack/path"
+            case 1:
+                return "Keep drawing along the crack/path"
+            default:
+                return "Continue drawing or tap Finish Trace to measure total length"
             }
         }
     }

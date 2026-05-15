@@ -138,6 +138,45 @@ class LiDARManager: ObservableObject {
     }
 
     
+    /// Calculates total path length from multiple traced screen points
+    /// - Parameters:
+    ///   - points: Ordered screen points (normalized 0-1)
+    ///   - depthData: The depth data to use
+    ///   - imageSize: The displayed image size
+    /// - Returns: Total path length in centimeters, or nil if calculation fails
+    func calculatePathLength(from points: [CGPoint], using depthData: DepthData, imageSize: CGSize) -> Double? {
+        guard points.count >= 2 else {
+            print("[LiDARManager] ❌ Need at least 2 points to calculate path length")
+            return nil
+        }
+        
+        print("[LiDARManager] === Path Length Calculation ===")
+        print("[LiDARManager] Tracing \(points.count) points")
+        
+        var totalDistanceCm: Double = 0
+        
+        for index in 0..<(points.count - 1) {
+            let startPoint = points[index]
+            let endPoint = points[index + 1]
+            
+            guard let segmentDistanceCm = calculateDistance(
+                from: startPoint,
+                to: endPoint,
+                using: depthData,
+                imageSize: imageSize
+            ) else {
+                print("[LiDARManager] ❌ Failed to calculate path segment \(index + 1)")
+                return nil
+            }
+            
+            totalDistanceCm += segmentDistanceCm
+            print("[LiDARManager] Segment \(index + 1): \(String(format: "%.1f", segmentDistanceCm))cm")
+        }
+        
+        print("[LiDARManager] ✅ Total path length: \(String(format: "%.1f", totalDistanceCm))cm")
+        return totalDistanceCm
+    }
+    
     /// Calculates bounding box dimensions from four corner points
     /// - Parameters:
     ///   - topLeft: Top-left corner (normalized 0-1)
